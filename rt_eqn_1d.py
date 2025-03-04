@@ -21,17 +21,21 @@ set_tensor_type(device="cuda")
 
 # from Iglesia & Rogers 1996, for rho = 100 kg/m^-3 and log10(T) = 6.5, log10(kappa) = -0.5
 
-kappa = 10**(-0.5) # opacity, in cm^2/g
-rho = 0.1 # bulk density, in g/cm^3
+#kappa = 10**(-0.5) # opacity, in cm^2/g
+kappa = 1 # opacity, in cm^2/g
+#rho = 0.1 # bulk density, in g/cm^3
+rho = 1 # bulk density, in g/cm^3
 T = 10**(6.5) # temperature, in Kelvin
+#T = 1 # temperature, in Kelvin
 #R = 6.957e8 # Solar radius
-R = 100 # 
+R = 1 # 
 I_0 = 1 # intensity at r=0
 wav = 5e-5 # 500 nm to cm
 h = 6.626e-27 # cm^2 g s^-1
 c = 2.9979e10 # cm/s
 k = 1.3807e-16 # cm^2 g s^-2 K^-1
 S_nu = (2*h*c**2/wav**5) * 1/(np.exp(h*c/(wav*k*T)) -1)
+S_nu /= S_nu
 
 # radiation transport equation in 1-D (using a 1-D solver)
 # du/dt - k*d^2u/dx^2 = 0
@@ -88,6 +92,5 @@ I_nu = S_nu*np.exp(-kappa*rho*(R - rs)) + I_0*np.exp(-kappa*rho*R)
 plt.close() # close all previous plots
 plt.plot(rs, I_nu_nn, c='r')
 plt.plot(rs, I_nu, c='k')
-plt.yscale('log')
 plt.savefig('rt_1d.png')
 
