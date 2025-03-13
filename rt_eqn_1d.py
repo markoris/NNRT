@@ -25,16 +25,14 @@ set_tensor_type(device="cuda")
 
 kappa = 0.3 # opacity, in cm^2/g
 rho = 0.1 # bulk density, in g/cm^3
-kappa = 1
-rho = 1
-R = 10 # maximum distance in cm 
+R = 33 # maximum distance in cm 
 #T = 10**(6.5) # temperature, in Kelvin
 #wav = 5e-5 # 500 nm to cm
 #h = 6.626e-27 # cm^2 g s^-1
 #c = 2.9979e10 # cm/s
 #k = 1.3807e-16 # cm^2 g s^-2 K^-1
 #S_nu = (2*h*c**2/wav**5) * 1/(np.exp(h*c/(wav*k*T)) -1)
-S_nu = 1.6 # artifically set S_nu = 0 to get simple exponential decay behavior
+S_nu = 0.42 # artifically set S_nu = 0 to get simple exponential decay behavior
 ### 
 
 I_0 = 1 # intensity at r=0
@@ -52,7 +50,7 @@ conditions = [IVP(t_0=0.0, u_0 = I_0)]
 
 # define the neural network architecture (basic, for now)
 nets = [
-    FCNN(n_input_units=1, hidden_units=(32, 32))
+    FCNN(n_input_units=1, hidden_units=(64, 64))
 ]
 
 # instantiate the solver
@@ -82,8 +80,8 @@ rs, I_nu_nn = to_numpy(rs), to_numpy(I_nu_nn)
 t_nu = kappa*rho*rs
 
 I_nu =  [ \
-            simpson(S_nu*np.exp(-(t_nu[i] - t_nu[:i+1])), x=rs[:i+1]) \
-            + I_0*np.exp(-kappa*rho*t_nu[i]) \
+            simpson(S_nu*np.exp(-(t_nu[i] - t_nu[:i+1])), x=t_nu[:i+1]) \
+            + I_0*np.exp(-t_nu[i]) \
         for i in range(len(rs)) \
         ]
 #I_nu = [simpson(I_nu[:i+1], x=t_nu[:i+1]) for i in range(len(t_nu))]
@@ -91,7 +89,7 @@ I_nu =  [ \
 #I_nu += I_0*np.exp(-kappa*rho*rs)
 
 plt.close() # close all previous plots
-plt.plot(rs, I_nu_nn, c='r')
-plt.plot(rs, I_nu, c='k')
+plt.plot(t_nu, I_nu_nn, c='r')
+plt.plot(t_nu, I_nu, c='k')
 plt.savefig('rt_1d.png')
 
