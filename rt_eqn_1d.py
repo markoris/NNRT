@@ -6,7 +6,6 @@ from neurodiffeq.solvers import Solver1D    # 2-D solver
 from neurodiffeq.monitors import Monitor1D  # 2-D monitor
 from neurodiffeq.generators import Generator1D # 2-D data generator
 from neurodiffeq.conditions import IVP   # initial-boundary value problem in 1-D
-from neurodiffeq.pde import make_animation
 from neurodiffeq.utils import set_tensor_type # allow training on GPU
 import matplotlib
 matplotlib.use('agg')
@@ -25,21 +24,22 @@ set_tensor_type(device="cuda")
 
 kappa = 0.3 # opacity, in cm^2/g
 rho = 0.1 # bulk density, in g/cm^3
-R = 100 # maximum distance in cm 
-#T = 10**(6.5) # temperature, in Kelvin
-#wav = 5e-5 # 500 nm to cm
-#h = 6.626e-27 # cm^2 g s^-1
-#c = 2.9979e10 # cm/s
-#k = 1.3807e-16 # cm^2 g s^-2 K^-1
-#S_nu = (2*h*c**2/wav**5) * 1/(np.exp(h*c/(wav*k*T)) -1)
-S_nu = 0.42 # artifically set S_nu = 0 to get simple exponential decay behavior
+R = 333 # maximum distance in cm 
+T = 10**(6.5) # temperature, in Kelvin
+wav = 5e-5 # 500 nm to cm
+h = 6.626e-27 # cm^2 g s^-1
+c = 2.9979e10 # cm/s
+k = 1.3807e-16 # cm^2 g s^-2 K^-1
+S_nu = (2*h*c**2/wav**5) * 1/(np.exp(h*c/(wav*k*T)) -1)
+#S_nu = 0.42 # artifically set S_nu = val to get simple exponential decay behavior
 ### 
 
-I_0 = 1 # intensity at r=0
+I_0 = 1.5*S_nu # intensity at r=0
+
+I_0, S_nu = np.log10(I_0), np.log10(S_nu)
 
 # radiation transport equation in 1-D (using a 1-D solver)
 # 0 = - dI/dtau - I_nu + S_nu
-# 0 = -1/(kappa*rho) * dI/dr - I_nu + S_nu
 rt = lambda I, tau : [
     -I - diff(I, tau) + S_nu 
 ]
@@ -81,12 +81,13 @@ I_nu =  [ \
             + I_0*np.exp(-taus[i]) \
         for i in range(len(taus)) \
         ]
-#I_nu = [simpson(I_nu[:i+1], x=t_nu[:i+1]) for i in range(len(t_nu))]
-#term2 = I_0*np.exp(-kappa*rho*
-#I_nu += I_0*np.exp(-kappa*rho*rs)
 
-plt.close() # close all previous plots
-plt.plot(taus, I_nu_nn, c='r')
-plt.plot(taus, I_nu, c='k')
+fig, ax = plt.subplots(figsize=(8, 6))
+ax.plot(taus, I_nu_nn, c='r')
+ax.plot(taus, I_nu, c='k')
+ax.set_yscale('log')
+ax.set_xlabel(r'$\tau$')
+ax.set_ylabel(r'$\log_{10} I_\nu$')
+ax.yaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter('%0.0f'))
 plt.savefig('rt_1d.png')
 
