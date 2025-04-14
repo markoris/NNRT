@@ -30,8 +30,8 @@ rho = 0.1 # bulk density, in g/cm^3
 R = 333 # maximum distance in cm 
 T = 5800 # temperature, in Kelvin
 #wav = 5e-5 # 500 nm to cm
-wav = np.logspace(3, 5, 1) # 1000 to 100,000 Angstroms (100 nm to 10 microns)
-wav_old = np.logspace(3, 5, 1)*1e-8 # 1000 to 100,000 Angstroms (100 nm to 10 microns) in units of cm
+wav = np.logspace(3, 5, 20) # 1000 to 100,000 Angstroms (100 nm to 10 microns)
+wav_old = np.logspace(3, 5, 20)*1e-8 # 1000 to 100,000 Angstroms (100 nm to 10 microns) in units of cm
 h = 6.626e-27 # cm^2 g s^-1
 c = 2.9979e10 # cm/s
 k = 1.3807e-16 # cm^2 g s^-2 K^-1
@@ -98,10 +98,13 @@ for j in range(I_nu.shape[1]):
 
 print(I_nu_nn.shape, I_nu.shape)
 
-fig, ax = plt.subplots(figsize=(8, 6))
-ax.plot(wav, I_nu_nn[25, :], c='r')
-ax.plot(wav, I_nu[25, :], c='k')
-ax.plot(wav, S_nu_old, c='blue', ls='--') # sanity check
+plt.rc('font', size=18)
+tau_idx = np.argmin(np.abs(taus-3))
+fig, ax = plt.subplots(figsize=(10, 8))
+ax.plot(wav, I_nu_nn[tau_idx, :], c='r', label='NN')
+ax.plot(wav, I_nu[tau_idx, :], c='k', label='analytic')
+ax.plot(wav, S_nu_old, c='blue', ls='--', label=r'$S_\lambda$') # source function reference
+ax.set_title(r'$\tau = {}$'.format(taus[tau_idx]))
 ax.set_xscale('log')
 ax.set_xlabel(r'$\lambda \ [\AA]$')
 ax.set_ylabel(r'$\log_{10} I_\nu \ [\frac{erg}{s cm^2 A}]$')
@@ -120,6 +123,8 @@ for fltr in range(len(filters)):
     text_loc = text_locs[fltr_band]
     fltr_indx = wavelengths.find(fltr_band)
     plt.axvspan(wav_low, wav_upp, alpha=0.5, color=colors[wavelengths[fltr_indx]])
+plt.legend(fontsize=14)
+plt.tight_layout()
 plt.savefig('I_vs_lambda.png')
 
 fig, ax = plt.subplots(figsize=(8, 6))
