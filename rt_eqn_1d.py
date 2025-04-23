@@ -30,8 +30,8 @@ rho = 0.1 # bulk density, in g/cm^3
 R = 333 # maximum distance in cm 
 T = 5800 # temperature, in Kelvin
 #wav = 5e-5 # 500 nm to cm
-wav = np.logspace(3, 5, 20) # 1000 to 100,000 Angstroms (100 nm to 10 microns)
-wav_old = np.logspace(3, 5, 20)*1e-8 # 1000 to 100,000 Angstroms (100 nm to 10 microns) in units of cm
+wav = np.logspace(3, 5, 1) # 1000 to 100,000 Angstroms (100 nm to 10 microns)
+wav_old = np.logspace(3, 5, 1)*1e-8 # 1000 to 100,000 Angstroms (100 nm to 10 microns) in units of cm
 h = 6.626e-27 # cm^2 g s^-1
 c = 2.9979e10 # cm/s
 k = 1.3807e-16 # cm^2 g s^-2 K^-1
@@ -46,7 +46,6 @@ S_nu = torch.Tensor(S_nu).to('cuda:0')
 ### 
 
 I_0 = 15*S_nu # intensity at r=0
-
 I_0, S_nu = torch.log10(I_0), torch.log10(S_nu)
 
 # radiation transport equation in 1-D (using a 1-D solver)
@@ -59,13 +58,14 @@ rt = lambda I, tau : [
 
 # initial conditions
 # solving only for one function, thus we have a single condition object
-conditions = [IVP(t_0=0.0, u_0 = I_0) for _ in range(len(wav))]
-
+#conditions = [IVP(t_0=0.0, u_0 = I_0[i]) for i in range(len(wav))]
+conditions = [IVP(t_0=0.0, u_0 = I_0[i]) for i in range(len(wav))]
 # define the neural network architecture (basic, for now)
 nets = [
-    FCNN(n_input_units=1, hidden_units=(16, 16), n_output_units=len(wav))
+    FCNN(n_input_units=1, hidden_units=(32,), n_output_units=1)
+    #FCNN(n_input_units=1, hidden_units=(512,)) for i in range(len(wav))
 ]
-
+print(I_0)
 # instantiate the solver
 
 solver = Solver1D(
@@ -75,16 +75,21 @@ solver = Solver1D(
     train_generator=Generator1D(32, 0, kappa*rho*R, method="equally-spaced-noisy"),
     valid_generator=Generator1D(32, 0, kappa*rho*R, method="equally-spaced")
 )
-
+print(solver.get_internals())
 # train neural network
 solver.fit(max_epochs=1000)
+
+counter = 1
+for (a, b) in zip(solver.metrics_history['train_loss'], solver.metrics_history['valid_loss']):
+    if (counter % 10) == 0: print(a, b)
+    counter += 1
 
 # recover NN solution
 solution_nn_rt = solver.get_solution()
 
 # plot solution on grid
 taus = torch.linspace(0, kappa*rho*R, 101)
-I_nu_nn = solution_nn_rt(taus)
+I_nu_nn = solution_nn_rt(taus).reshape(taus.shape[0], -1)
 
 taus, I_nu_nn, S_nu = to_numpy(taus), to_numpy(I_nu_nn), to_numpy(S_nu)
 
@@ -99,7 +104,7 @@ for j in range(I_nu.shape[1]):
 print(I_nu_nn.shape, I_nu.shape)
 
 plt.rc('font', size=18)
-tau_idx = np.argmin(np.abs(taus-3))
+tau_idx = np.argmin(np.abs(taus-0.2))
 fig, ax = plt.subplots(figsize=(10, 8))
 ax.plot(wav, I_nu_nn[tau_idx, :], c='r', label='NN')
 ax.plot(wav, I_nu[tau_idx, :], c='k', label='analytic')
@@ -130,9 +135,9 @@ plt.savefig('I_vs_lambda.png')
 fig, ax = plt.subplots(figsize=(8, 6))
 for i in range(I_nu.shape[1]):
     ax.plot(taus, I_nu_nn[:, i], c='r')
-    ax.plot(taus, I_nu[:, i], label=wav[i]*1e7)
+    ax.plot(taus, I_nu[:, i], label=wav[i])
 ax.set_xlabel(r'$\tau$')
 ax.set_ylabel(r'$\log_{10} I_\nu$')
-plt.legend()
-ax.yaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter('%0.0f'))
+#plt.legend()
+#ax.yaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter('%0.0f'))
 plt.savefig('I_vs_tau.png')
