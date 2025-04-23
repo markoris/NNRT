@@ -1,12 +1,12 @@
 import torch, glob
 import numpy as np
-#from neurodiffeq import diff                # differentiation operator
-from neurodiffeq.neurodiffeq import unsafe_diff as diff
+from neurodiffeq import diff                # differentiation operator
+#from neurodiffeq.neurodiffeq import unsafe_diff as diff
 from neurodiffeq.networks import FCNN       # fully-connected neural network (MRP)
 from neurodiffeq.solvers import BundleSolver1D    # 2-D solver
 from neurodiffeq.monitors import Monitor1D  # 2-D monitor
 from neurodiffeq.generators import Generator1D # 2-D data generator
-from neurodiffeq.conditions import EnsembleCondition, BundleIVP   # initial-boundary value problem in 1-D
+from neurodiffeq.conditions import EnsembleCondition, BundleIVP, IVP   # initial-boundary value problem in 1-D
 from neurodiffeq.utils import set_tensor_type # allow training on GPU
 import matplotlib
 matplotlib.use('agg')
@@ -14,6 +14,17 @@ import matplotlib.pyplot as plt
 from scipy.integrate import simpson
 from astropy.modeling.models import BlackBody
 from astropy import units as u
+
+class CNN(torch.nn.Module):
+    def __init__(self):
+        super(CNN, self).__init__()
+        self.conv1 = torch.nn.Conv1d(32768, 1, 3)
+        #self.fc1 = torch.nn.Linear(1, 3)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        #x = self.fc1(x)
+        return x
 
 def to_numpy(x):
     ''' helper function to convert PyTorch tensor to NumPy array '''
@@ -32,7 +43,7 @@ k = 1.3807e-16 # cm^2 g s^-2 K^-1
 rho = 0.1 # bulk density, in g/cm^3
 R = 333 # maximum distance in cm 
 T = 5800 # temperature, in Kelvin
-wav = torch.log10(torch.logspace(3, 5, 20)*1e-8) # 1000 to 100,000 Angstroms (100 nm to 10 microns)
+wav = torch.log10(torch.logspace(3, 5, 20)*1e-8) # 1000 to 100,000 Angstroms (100 nm to 10 microns), in units of cm
 # for training purposes, normalized between -5 and -3
 
 def kappa(wav):
@@ -54,16 +65,17 @@ def S_lam(wav):
 #]
 
 rt = lambda I, r, lam : [
-    -I - (1 / kappa(wav) / rho)*diff(I, r) + S_lam(lam)
+    -I - (1 / kappa(lam) / rho)*diff(I, r) + S_lam(lam)
 ]
 
 # initial conditions
 # solving only for one function, thus we have a single condition object
 conditions = [BundleIVP(t_0=0.0, u_0=None, bundle_param_lookup={'u_0': 1})]
+#conditions = [IVP(t_0=0.0, u_0=15*S_lam)]
 
 # define the neural network architecture (basic, for now)
 nets = [
-    FCNN(n_input_units=3, hidden_units=(16, 16), n_output_units=1)
+    FCNN(n_input_units=3, hidden_units=(32,), n_output_units=1)
 ]
 # instantiate the solver
 
@@ -73,8 +85,8 @@ solver = BundleSolver1D(
     nets = nets,
     t_min = 0,
     t_max = R,
-    theta_min=[wav.min(), S_lam(wav.min())],
-    theta_max=[wav.max(), S_lam(wav.max())],
+    theta_min=[wav.min(), S_lam(wav).min()],
+    theta_max=[wav.max(), S_lam(wav).max()],
     eq_param_index=(0,),
     n_batches_valid=10,
 )
@@ -82,8 +94,14 @@ solver = BundleSolver1D(
 # train neural network
 solver.fit(max_epochs=1000)
 
+print(solver.get_internals())
 # recover NN solution
-solution_nn_rt = solver.get_solution()
+solution_nn_rt = solver.get_solution(best=True)
+
+counter = 1
+for (a, b) in zip(solver.metrics_history['train_loss'], solver.metrics_history['valid_loss']):
+    if (counter % 10) == 0: print(a, b)
+    counter += 1
 
 # plot solution on grid
 Rs = torch.linspace(0, R, 101)
@@ -119,8 +137,7 @@ print(I_nu_nn.shape, I_nu.shape)
 wav = to_numpy(10**wav*1e8) # Angstroms
 
 plt.rc('font', size=18)
-print(taus)
-tau_idx = np.argmin(np.abs(taus-2))
+tau_idx = np.argmin(np.abs(taus-0.2))
 fig, ax = plt.subplots(figsize=(10, 8))
 ax.plot(wav, I_nu_nn[tau_idx, :], c='r', label='NN')
 ax.plot(wav, I_nu[tau_idx, :], c='k', label='analytic')
