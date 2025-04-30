@@ -43,7 +43,7 @@ def S_lam(wav):
     wav = wav*unit.AA
     S_lambda = BlackBody(temperature=5800*unit.K, scale=1*unit.erg / (unit.cm**2 * unit.s * unit.AA * unit.sr))
     S_lambda = S_lambda(wav)
-    return torch.log10(torch.Tensor([S_lambda.value]))
+    return torch.log10(torch.Tensor(np.array([S_lambda.value])))
 
 TAU_MIN, TAU_MAX = 0, 10
 
@@ -67,10 +67,10 @@ nets = [
     NN()
 ]
 
-#train_gen = GeneratorND(grid=[64, 64, 64], r_min=[TAU_MIN, LAMBDA_MIN, I0_MIN], r_max=[TAU_MAX, LAMBDA_MAX, I0_MAX],\
-#                        methods=['uniform', 'uniform', 'uniform'])
-#valid_gen = GeneratorND(grid=[128, 128, 128], r_min=[TAU_MIN, LAMBDA_MIN, I0_MIN], r_max=[TAU_MAX, LAMBDA_MAX, I0_MAX],\
-#                        methods=['uniform', 'uniform', 'uniform'])
+train_gen = GeneratorND(grid=[16, 32, 16], r_min=[TAU_MIN, LAMBDA_MIN, I0_MIN], r_max=[TAU_MAX, LAMBDA_MAX, I0_MAX],\
+                        methods=['uniform', 'log-spaced', 'uniform'])
+valid_gen = GeneratorND(grid=[16, 32, 16], r_min=[TAU_MIN, LAMBDA_MIN, I0_MIN], r_max=[TAU_MAX, LAMBDA_MAX, I0_MAX],\
+                        methods=['uniform', 'log-spaced', 'uniform'])
 
 solver = BundleSolver1D(
     ode_system=diff_eq,
@@ -86,12 +86,12 @@ solver = BundleSolver1D(
     n_batches_valid=1,
 )
 
-solver.fit(max_epochs=150)
+solver.fit(max_epochs=500)
 solution = solver.get_solution(best=True)
 
-# Convert our scalar wavelength to a vector of 20 wavelengths
+# Convert our scalar wavelength to a vector of 10 wavelengths
 
-wav = np.logspace(np.log10(4000), np.log10(7000), 20)
+wav = np.logspace(np.log10(4000), np.log10(7000), 10)
 
 ## Define our analytic solution for a blackbody source function starting at some intensity I_0 = 2*S_\lambda
 
@@ -133,7 +133,7 @@ for l, lmd_value in enumerate(wav):
     I_nu_nn[:, l] = solution(taus, lmd, u0, to_numpy=True)  # network solution takes in three inputs
 
 plt.rc('font', size=18)
-tau_idx = np.argmin(np.abs(taus-10))
+tau_idx = np.argmin(np.abs(taus-0.1))
 fig, ax = plt.subplots(figsize=(10, 8))
 ax.plot(wav, I_nu_nn[tau_idx, :], c='r', label='NN')
 ax.plot(wav, I_nu[tau_idx, :], c='k', label='analytic')
@@ -151,8 +151,17 @@ fig, ax = plt.subplots(figsize=(8, 6))
 for i in range(I_nu.shape[1]):
     ax.plot(taus, I_nu_nn[:, i], c='r')
     ax.plot(taus, I_nu[:, i], label=wav[i])
+plt.xscale('log')
 ax.set_xlabel(r'$\tau$')
 ax.set_ylabel(r'$\log_{10} I_\nu$')
 #plt.legend()
 #ax.yaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter('%0.0f'))
 plt.savefig('I_vs_tau.png')
+
+fig, ax = plt.subplots(figsize=(8, 6))
+plt.plot(solver.metrics_history['train_loss'], label='train loss')
+plt.plot(solver.metrics_history['valid_loss'], label='valid loss')
+plt.yscale('log')
+plt.xlabel('Epoch')
+plt.legend()
+plt.savefig('loss.png')
