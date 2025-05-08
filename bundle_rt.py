@@ -11,6 +11,7 @@ from astropy import units as unit
 from neurodiffeq.networks import FCNN, Swish
 from neurodiffeq.generators import GeneratorND
 from scipy.integrate import simpson
+from utils import save
 
 neurodiffeq.utils.set_tensor_type('cpu')
 
@@ -87,48 +88,10 @@ solver = BundleSolver1D(
     loss_fn=torch.nn.modules.loss.MSELoss()
 )
 
-solver.fit(max_epochs=10)
+solver.fit(max_epochs=50000)
 solution = solver.get_solution(best=True)
 
-save_dict = solver.get_internals('all')
-save_dict['optimizer'] = solver.optimizer.state_dict()
-save_dict['type'] = solver.__class__
-print(save_dict['r_min'])
-#save_dict = {
-#            "metrics": solver.metrics_fn,
-#            "n_batches": solver.n_batches,
-#            "best_nets": solver.best_nets,
-#            "loss_fn": solver.loss_fn,
-#            "conditions": solver.conditions,
-#            "global_epoch": solver.global_epoch,
-#            "lowest_loss": solver.lowest_loss,
-#            "n_funcs": solver.n_funcs,
-#            "nets": solver.nets,
-#            "optimizer_state_dict": solver.optimizer.state_dict(),
-#            "diff_eqs": solver.diff_eqs,
-#            "generator": solver.generator,
-#            "train_generator": solver.generator['train'],
-#            "valid_generator": solver.generator['valid'],
-#            "type": solver.__class__,
-#            "tmin": TAU_MIN,
-#            "tmax": TAU_MAX,
-#        }
-
-#save_dict2 = solver.get_internals('all')
-#print(save_dict.keys())
-#print(save_dict2.keys())
-
-with open("model_params.pt", 'wb') as f:
-    dill.dump(save_dict, f)
-with open("model_params.pt", 'rb') as f:
-    solver_params = dill.load(f)
-new_solver = solver_params["type"]( ode_system=solver_params['diff_eqs'], 
-                                    conditions=solver_params['conditions'], 
-                                    t_min=solver_params['r_min'][0],
-                                    t_max=solver_params['r_max'][0])
-for key in save_dict.keys():
-    if "key" == "type": continue
-    new_solver.key = solver_params[key]
+save(solver, "model_params.pt")
 
 # Convert our scalar wavelength to a vector of 10 wavelengths
 
@@ -168,10 +131,16 @@ I_nu_nn = np.zeros((len(taus), len(wav)))
 for l, lmd_value in enumerate(wav):
     lmd = math.log10(lmd_value) * torch.ones_like(taus)
     u0 = np.log10(2)+S_lam(torch.log10(torch.tensor([lmd_value]))) * torch.ones_like(taus)
-    #u0_value = to_numpy(np.log10(2)+S_lam(lmd_value))
-    #lmd = to_numpy(lmd_value) * np.ones_like(R)
-    #u0 = u0_value * np.ones_like(taus)
     I_nu_nn[:, l] = solution(taus, lmd, u0, to_numpy=True)  # network solution takes in three inputs
+#    print(not np.any(solution(taus, lmd, u0, to_numpy=True)-new_solution(taus, lmd, u0, to_numpy=True)))
+
+fig, ax = plt.subplots(figsize=(8, 6))
+plt.plot(solver.metrics_history['train_loss'], label='train loss')
+plt.plot(solver.metrics_history['valid_loss'], label='valid loss')
+plt.yscale('log')
+plt.xlabel('Epoch')
+plt.legend()
+plt.savefig('loss.png')
 
 plt.rc('font', size=18)
 tau_idx = np.argmin(np.abs(taus-2.0))
@@ -183,7 +152,6 @@ ax.set_title(r'$\tau = {}$'.format(taus[tau_idx]))
 ax.set_xscale('log')
 ax.set_xlabel(r'$\lambda \ [\AA]$')
 ax.set_ylabel(r'$\log_{10} I_\nu \ [\frac{erg}{s cm^2 A}]$')
-#ax.yaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter('%0.0f'))
 plt.legend(fontsize=14)
 plt.tight_layout()
 plt.savefig('I_vs_lambda.png')
@@ -192,17 +160,6 @@ fig, ax = plt.subplots(figsize=(8, 6))
 for i in range(I_nu.shape[1]):
     ax.plot(taus, I_nu_nn[:, i], c='r')
     ax.plot(taus, I_nu[:, i], label=wav[i])
-#plt.xscale('log')
 ax.set_xlabel(r'$\tau$')
 ax.set_ylabel(r'$\log_{10} I_\nu$')
-#plt.legend()
-#ax.yaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter('%0.0f'))
 plt.savefig('I_vs_tau.png')
-
-fig, ax = plt.subplots(figsize=(8, 6))
-plt.plot(solver.metrics_history['train_loss'], label='train loss')
-plt.plot(solver.metrics_history['valid_loss'], label='valid loss')
-plt.yscale('log')
-plt.xlabel('Epoch')
-plt.legend()
-plt.savefig('loss.png')
