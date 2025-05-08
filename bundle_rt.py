@@ -1,4 +1,4 @@
-import matplotlib
+import matplotlib, dill
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import numpy as np
@@ -84,10 +84,51 @@ solver = BundleSolver1D(
     theta_max=[LAMBDA_MAX, I0_MAX[0]],  # 0: lambda, 1: u_0
     eq_param_index=(0,),  # we refer to lambda as parameter 0; correspondingly u_0 is parameter 1 (as in conditions above)
     n_batches_valid=1,
+    loss_fn=torch.nn.modules.loss.MSELoss()
 )
 
-solver.fit(max_epochs=500)
+solver.fit(max_epochs=10)
 solution = solver.get_solution(best=True)
+
+save_dict = solver.get_internals('all')
+save_dict['optimizer'] = solver.optimizer.state_dict()
+save_dict['type'] = solver.__class__
+print(save_dict['r_min'])
+#save_dict = {
+#            "metrics": solver.metrics_fn,
+#            "n_batches": solver.n_batches,
+#            "best_nets": solver.best_nets,
+#            "loss_fn": solver.loss_fn,
+#            "conditions": solver.conditions,
+#            "global_epoch": solver.global_epoch,
+#            "lowest_loss": solver.lowest_loss,
+#            "n_funcs": solver.n_funcs,
+#            "nets": solver.nets,
+#            "optimizer_state_dict": solver.optimizer.state_dict(),
+#            "diff_eqs": solver.diff_eqs,
+#            "generator": solver.generator,
+#            "train_generator": solver.generator['train'],
+#            "valid_generator": solver.generator['valid'],
+#            "type": solver.__class__,
+#            "tmin": TAU_MIN,
+#            "tmax": TAU_MAX,
+#        }
+
+#save_dict2 = solver.get_internals('all')
+#print(save_dict.keys())
+#print(save_dict2.keys())
+
+with open("model_params.pt", 'wb') as f:
+    dill.dump(save_dict, f)
+with open("model_params.pt", 'rb') as f:
+    solver_params = dill.load(f)
+new_solver = solver_params["type"]( ode_system=solver_params['diff_eqs'], 
+                                    conditions=solver_params['conditions'], 
+                                    t_min=solver_params['r_min'][0],
+                                    t_max=solver_params['r_max'][0])
+for key in save_dict.keys():
+    if "key" == "type": continue
+    new_solver.key = solver_params[key]
 
 # Convert our scalar wavelength to a vector of 10 wavelengths
 
@@ -133,7 +174,7 @@ for l, lmd_value in enumerate(wav):
     I_nu_nn[:, l] = solution(taus, lmd, u0, to_numpy=True)  # network solution takes in three inputs
 
 plt.rc('font', size=18)
-tau_idx = np.argmin(np.abs(taus-0.1))
+tau_idx = np.argmin(np.abs(taus-2.0))
 fig, ax = plt.subplots(figsize=(10, 8))
 ax.plot(wav, I_nu_nn[tau_idx, :], c='r', label='NN')
 ax.plot(wav, I_nu[tau_idx, :], c='k', label='analytic')
@@ -151,7 +192,7 @@ fig, ax = plt.subplots(figsize=(8, 6))
 for i in range(I_nu.shape[1]):
     ax.plot(taus, I_nu_nn[:, i], c='r')
     ax.plot(taus, I_nu[:, i], label=wav[i])
-plt.xscale('log')
+#plt.xscale('log')
 ax.set_xlabel(r'$\tau$')
 ax.set_ylabel(r'$\log_{10} I_\nu$')
 #plt.legend()
