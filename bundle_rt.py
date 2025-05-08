@@ -11,7 +11,7 @@ from astropy import units as unit
 from neurodiffeq.networks import FCNN, Swish
 from neurodiffeq.generators import GeneratorND
 from scipy.integrate import simpson
-from utils import save
+from utils import save, train
 
 neurodiffeq.utils.set_tensor_type('cpu')
 
@@ -88,7 +88,9 @@ solver = BundleSolver1D(
     loss_fn=torch.nn.modules.loss.MSELoss()
 )
 
-solver.fit(max_epochs=50000)
+train(solver, epochs=[5000, 10000, 25000], lrs=[1e-2, 1e-3, 1e-4])
+
+#solver.fit(max_epochs=50000)
 solution = solver.get_solution(best=True)
 
 save(solver, "model_params.pt")
