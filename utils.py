@@ -1,4 +1,5 @@
 import dill
+from torch.optim import Adam
 def save(solver, fname="model_params.pt"):
     '''
     Saves a BundleIVP1D solver with the assumption that an Adam optimizer is used
@@ -34,3 +35,15 @@ def load(fname):
         setattr(solver, key, solver_params[key])
 
     return solver
+
+def train(solver, epochs=[500, 1000, 2000, 4000, 8000], lrs=[1e-2, 5e-3, 1e-3, 5e-4, 1e-4]):
+
+    for epoch, lr in zip(epochs, lrs):
+
+        for g in solver.optimizer.param_groups:
+            g['lr'] = lr
+        #setattr(solver, 'optimizer', Adam(solver.nets[0].parameters(), lr=lr))
+        solver.fit(max_epochs=epoch)
+        #save(solver, fname='solver.chkp')
+
+    return solver 
