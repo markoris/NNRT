@@ -4,11 +4,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import math, torch, neurodiffeq
 from neurodiffeq.solvers import BundleSolver1D
-from neurodiffeq.conditions import BundleIVP
+from neurodiffeq.conditions import BundleIVP, IVP
 from neurodiffeq import diff
 from astropy.modeling.models import BlackBody
 from astropy import units as unit
-from neurodiffeq.networks import FCNN, Swish
+from neurodiffeq.networks import FCNN
 from neurodiffeq.generators import GeneratorND
 from scipy.integrate import simpson
 from utils import save, train
@@ -19,16 +19,21 @@ class NN(torch.nn.Module):
     def __init__(self):
         super(NN, self).__init__()
     
-        self.lin1 = torch.nn.Linear(3, 32)
+        #self.lin1 = torch.nn.Linear(3, 32)
+        self.lin1 = torch.nn.Linear(2, 32)
         self.lin2 = torch.nn.Linear(32, 32)
-        self.lin4 = torch.nn.Linear(32, 1)
-        self.sw1 = Swish(trainable=True)
-        self.sw2 = Swish(trainable=True)
+        self.lin3 = torch.nn.Linear(32, 32)
+        self.lin4 = torch.nn.Linear(32, 32)
+        self.lin5 = torch.nn.Linear(32, 32)
+        self.lin6 = torch.nn.Linear(32, 1)
 
-    def forward(x):
-        x = self.sw1(self.lin1(x))
-        x = self.sw2(self.lin2(x))
-        x = self.lin3(x)
+    def forward(self, x):
+        x = torch.tanh(self.lin1(x))
+        x = torch.tanh(self.lin2(x))
+        x = torch.tanh(self.lin3(x))
+        x = torch.tanh(self.lin4(x))
+        x = torch.tanh(self.lin5(x))
+        x = self.lin6(x)
         return x
 
 def to_numpy(x):
@@ -59,8 +64,13 @@ print(I0_MIN[0], I0_MAX[0])
 
 diff_eq = lambda I, t, lmd: [-I - diff(I, t) + S_lam(lmd)]
 
+#conditions = [
+#    BundleIVP(t_0=0, u_0=None, bundle_param_lookup={'u_0': 1})   # we refer to u_0 as parameter 1; correspondingly lambda will be parameter 0 below
+#]
+
+# Learning only S_lambda as a function of lambda, fix I_0 to some value
 conditions = [
-    BundleIVP(t_0=0, u_0=None, bundle_param_lookup={'u_0': 1})   # we refer to u_0 as parameter 1; correspondingly lambda will be parameter 0 below
+    BundleIVP(t_0=0, u_0=I0_MAX)   # we refer to u_0 as parameter 1; correspondingly lambda will be parameter 0 below
 ]
 
 nets = [
@@ -81,19 +91,30 @@ solver = BundleSolver1D(
     t_max=TAU_MAX, 
 #    train_generator=train_gen,
 #    valid_generator=valid_gen,
-    theta_min=[LAMBDA_MIN, I0_MIN[0]],  # 0: lambda, 1: u_0
-    theta_max=[LAMBDA_MAX, I0_MAX[0]],  # 0: lambda, 1: u_0
+#    theta_min=[LAMBDA_MIN, I0_MIN[0]],  # 0: lambda, 1: u_0
+#    theta_max=[LAMBDA_MAX, I0_MAX[0]],  # 0: lambda, 1: u_0
+    theta_min=[LAMBDA_MIN],  # 0: lambda, 1: u_0
+    theta_max=[LAMBDA_MAX],  # 0: lambda, 1: u_0
     eq_param_index=(0,),  # we refer to lambda as parameter 0; correspondingly u_0 is parameter 1 (as in conditions above)
     n_batches_valid=1,
-    loss_fn=torch.nn.modules.loss.MSELoss()
+    loss_fn=torch.nn.modules.loss.MSELoss(),
+    nets=nets,
 )
 
-train(solver, epochs=[5000, 10000, 25000], lrs=[1e-2, 1e-3, 1e-4])
+#train(solver, epochs=[10, 10, 10], lrs=[1e-3, 5e-4, 1e-4])
 
-#solver.fit(max_epochs=50000)
+solver.fit(max_epochs=40000)
 solution = solver.get_solution(best=True)
 
 save(solver, "model_params.pt")
+
+fig, ax = plt.subplots(figsize=(8, 6))
+plt.plot(solver.metrics_history['train_loss'], label='train loss')
+plt.plot(solver.metrics_history['valid_loss'], label='valid loss')
+plt.yscale('log')
+plt.xlabel('Epoch')
+plt.legend()
+plt.savefig('loss.png')
 
 # Convert our scalar wavelength to a vector of 10 wavelengths
 
@@ -132,17 +153,10 @@ I_nu_nn = np.zeros((len(taus), len(wav)))
 
 for l, lmd_value in enumerate(wav):
     lmd = math.log10(lmd_value) * torch.ones_like(taus)
-    u0 = np.log10(2)+S_lam(torch.log10(torch.tensor([lmd_value]))) * torch.ones_like(taus)
-    I_nu_nn[:, l] = solution(taus, lmd, u0, to_numpy=True)  # network solution takes in three inputs
+    u0 = np.log10(10)+S_lam(torch.log10(torch.tensor([lmd_value]))) * torch.ones_like(taus)
+    #I_nu_nn[:, l] = solution(taus, lmd, u0, to_numpy=True)  # network solution takes in three inputs
+    I_nu_nn[:, l] = solution(taus, lmd, to_numpy=True)  # network solution takes in two inputs
 #    print(not np.any(solution(taus, lmd, u0, to_numpy=True)-new_solution(taus, lmd, u0, to_numpy=True)))
-
-fig, ax = plt.subplots(figsize=(8, 6))
-plt.plot(solver.metrics_history['train_loss'], label='train loss')
-plt.plot(solver.metrics_history['valid_loss'], label='valid loss')
-plt.yscale('log')
-plt.xlabel('Epoch')
-plt.legend()
-plt.savefig('loss.png')
 
 plt.rc('font', size=18)
 tau_idx = np.argmin(np.abs(taus-2.0))
