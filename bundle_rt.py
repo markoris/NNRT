@@ -54,13 +54,10 @@ def S_lam(wav):
 TAU_MIN, TAU_MAX = 0, 10
 
 #-- We change the limits of \lambda to be between 400 and 700 nm, in log-space
-LAMBDA_MIN, LAMBDA_MAX = math.log10(4000), math.log10(7000)
+LAMBDA_MIN, LAMBDA_MAX = np.log10(4000), np.log10(7000)
 
-#-- We change the limits of I_0 to be scalar multiples of S_lam
-#-- This requires a wavelength input, so let's use 550 nm for now
-I0_MIN, I0_MAX = math.log10(0.1)+S_lam(math.log10(5500)), math.log10(10)+S_lam(math.log10(5500))
-
-print(I0_MIN[0], I0_MAX[0])
+#-- Assume a single initial value of I0, evolve it to a wavelength-dependent source function
+I0 = np.log10(10)+S_lam(math.log10(5500))
 
 diff_eq = lambda I, t, lmd: [-I - diff(I, t) + S_lam(lmd)]
 
@@ -70,7 +67,7 @@ diff_eq = lambda I, t, lmd: [-I - diff(I, t) + S_lam(lmd)]
 
 # Learning only S_lambda as a function of lambda, fix I_0 to some value
 conditions = [
-    BundleIVP(t_0=0, u_0=I0_MAX)   # we refer to u_0 as parameter 1; correspondingly lambda will be parameter 0 below
+    BundleIVP(t_0=0, u_0=I0)   # we refer to u_0 as parameter 1; correspondingly lambda will be parameter 0 below
 ]
 
 nets = [
@@ -78,10 +75,10 @@ nets = [
     NN()
 ]
 
-train_gen = GeneratorND(grid=[16, 32, 16], r_min=[TAU_MIN, LAMBDA_MIN, I0_MIN], r_max=[TAU_MAX, LAMBDA_MAX, I0_MAX],\
-                        methods=['uniform', 'log-spaced', 'uniform'])
-valid_gen = GeneratorND(grid=[16, 32, 16], r_min=[TAU_MIN, LAMBDA_MIN, I0_MIN], r_max=[TAU_MAX, LAMBDA_MAX, I0_MAX],\
-                        methods=['uniform', 'log-spaced', 'uniform'])
+#train_gen = GeneratorND(grid=[16, 32, 16], r_min=[TAU_MIN, LAMBDA_MIN, I0_MIN], r_max=[TAU_MAX, LAMBDA_MAX, I0_MAX],\
+#                        methods=['uniform', 'log-spaced', 'uniform'])
+#valid_gen = GeneratorND(grid=[16, 32, 16], r_min=[TAU_MIN, LAMBDA_MIN, I0_MIN], r_max=[TAU_MAX, LAMBDA_MAX, I0_MAX],\
+#                        methods=['uniform', 'log-spaced', 'uniform'])
 
 solver = BundleSolver1D(
     ode_system=diff_eq,
@@ -103,7 +100,7 @@ solver = BundleSolver1D(
 
 #train(solver, epochs=[10, 10, 10], lrs=[1e-3, 5e-4, 1e-4])
 
-solver.fit(max_epochs=40000)
+solver.fit(max_epochs=20)
 solution = solver.get_solution(best=True)
 
 save(solver, "model_params.pt")
@@ -137,39 +134,55 @@ S_lam_analytic *= 1e-8 # erg / s / cm2 / cm to erg / s / cm2 / A
 
 # Initial condition
 
-I_0 = 2*S_lam_analytic # intensity at r=0
+#I_0, S_lam_analytic = np.log10(I_0), np.log10(S_lam_analytic)
+S_lam_analytic = np.log10(S_lam_analytic)
 
-I_0, S_lam_analytic = np.log10(I_0), np.log10(S_lam_analytic)
-
-taus = torch.linspace(0, 10, 100)
+taus = np.linspace(0, 10, 100)
 I_nu = np.zeros((len(taus), len(wav)))
 
 for j in range(len(wav_analytic)):
     for i in range(len(taus)):
         I_nu[i, j] = simpson(S_lam_analytic[j]*np.exp(-(taus[i] - taus[:i+1])), x=taus[:i+1]) \
-        + I_0[j]*np.exp(-taus[i])
+        + I0*np.exp(-taus[i])
 
 I_nu_nn = np.zeros((len(taus), len(wav)))
 
 for l, lmd_value in enumerate(wav):
-    lmd = math.log10(lmd_value) * torch.ones_like(taus)
-    u0 = np.log10(10)+S_lam(torch.log10(torch.tensor([lmd_value]))) * torch.ones_like(taus)
-    #I_nu_nn[:, l] = solution(taus, lmd, u0, to_numpy=True)  # network solution takes in three inputs
-    I_nu_nn[:, l] = solution(taus, lmd, to_numpy=True)  # network solution takes in two inputs
-#    print(not np.any(solution(taus, lmd, u0, to_numpy=True)-new_solution(taus, lmd, u0, to_numpy=True)))
+    lmd = torch.Tensor(np.log10(lmd_value) * np.ones_like(taus))
+    I_nu_nn[:, l] = solution(torch.Tensor(taus), lmd, to_numpy=True)  # network solution takes in two inputs
 
-plt.rc('font', size=18)
-tau_idx = np.argmin(np.abs(taus-2.0))
-fig, ax = plt.subplots(figsize=(10, 8))
-ax.plot(wav, I_nu_nn[tau_idx, :], c='r', label='NN')
-ax.plot(wav, I_nu[tau_idx, :], c='k', label='analytic')
-ax.plot(wav_analytic*1e8, S_lam_analytic, c='blue', ls='--', label=r'$S_\lambda$') # source function reference
-ax.set_title(r'$\tau = {}$'.format(taus[tau_idx]))
-ax.set_xscale('log')
-ax.set_xlabel(r'$\lambda \ [\AA]$')
-ax.set_ylabel(r'$\log_{10} I_\nu \ [\frac{erg}{s cm^2 A}]$')
-plt.legend(fontsize=14)
-plt.tight_layout()
+#plt.rc('font', size=18)
+#tau_idx = np.argmin(np.abs(taus-2.0))
+#fig, ax = plt.subplots(figsize=(10, 8))
+#ax.plot(wav, I_nu_nn[tau_idx, :], c='r', label='NN')
+#ax.plot(wav, I_nu[tau_idx, :], c='k', label='analytic')
+#ax.plot(wav_analytic*1e8, S_lam_analytic, c='blue', ls='--', label=r'$S_\lambda$') # source function reference
+#ax.set_title(r'$\tau = {}$'.format(taus[tau_idx]))
+#ax.set_xscale('log')
+#ax.set_xlabel(r'$\lambda \ [\AA]$')
+#ax.set_ylabel(r'$\log_{10} I_\nu \ [\frac{erg}{s cm^2 A}]$')
+#plt.legend(fontsize=14)
+#plt.tight_layout()
+#plt.savefig('I_vs_lambda.png')
+
+plt.rc('font', size=20)
+fig, axs = plt.subplots(2, 2, figsize=(16, 12))
+ref_tau = np.array([[0, 2], [5, 10]])
+for i in [0, 1]:
+    for j in [0, 1]:
+        plt.rc('font', size=18)
+        tau_idx = np.argmin(np.abs(taus-ref_tau[i, j]))
+        axs[i, j].plot(wav, I_nu_nn[tau_idx, :], c='r', label='NN')
+        axs[i, j].plot(wav, I_nu[tau_idx, :], c='k', label='analytic')
+        axs[i, j].plot(wav_analytic*1e8, S_lam_analytic, c='blue', ls='--', label=r'$S_\lambda$') # source function reference
+        axs[i, j].set_title(r'$\tau = {}$'.format(taus[tau_idx]))
+        axs[i, j].set_xscale('log')
+        axs[i, j].set_xlabel(r'$\lambda \ [\AA]$')
+        axs[i, j].set_ylabel(r'$\log_{10} I_\nu \ [\frac{erg}{s cm^2 A}]$')
+        #ax.yaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter('%0.0f'))
+        plt.tight_layout()
+handles, labels = axs[0, 0].get_legend_handles_labels()
+fig.legend(handles, labels, loc='center')
 plt.savefig('I_vs_lambda.png')
 
 fig, ax = plt.subplots(figsize=(8, 6))
