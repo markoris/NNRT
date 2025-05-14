@@ -1,14 +1,12 @@
-import matplotlib, dill
+import matplotlib, neurodiffeq, torch, dill, glob
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import numpy as np
-import math, torch, neurodiffeq
-from neurodiffeq.solvers import BundleSolver1D
-from neurodiffeq.conditions import BundleIVP, IVP
-from neurodiffeq import diff
 from astropy.modeling.models import BlackBody
 from astropy import units as unit
-from neurodiffeq.networks import FCNN
+from neurodiffeq import diff
+from neurodiffeq.solvers import BundleSolver1D
+from neurodiffeq.conditions import BundleIVP
 from neurodiffeq.generators import GeneratorND
 from scipy.integrate import simpson
 from utils import save, train
@@ -19,7 +17,6 @@ class NN(torch.nn.Module):
     def __init__(self):
         super(NN, self).__init__()
     
-        #self.lin1 = torch.nn.Linear(3, 32)
         self.lin1 = torch.nn.Linear(2, 32)
         self.lin2 = torch.nn.Linear(32, 32)
         self.lin3 = torch.nn.Linear(32, 32)
@@ -53,17 +50,13 @@ def S_lam(wav):
 
 TAU_MIN, TAU_MAX = 0, 10
 
-#-- We change the limits of \lambda to be between 400 and 700 nm, in log-space
-LAMBDA_MIN, LAMBDA_MAX = np.log10(4000), np.log10(7000)
+#-- We change the limits of \lambda to be between 100 and 1000 nm, in log-space
+LAMBDA_MIN, LAMBDA_MAX = np.log10(1000), np.log10(10000)
 
 #-- Assume a single initial value of I0, evolve it to a wavelength-dependent source function
-I0 = np.log10(10)+S_lam(math.log10(5500))
+I0 = np.log10(10)+S_lam(np.log10(5500))
 
 diff_eq = lambda I, t, lmd: [-I - diff(I, t) + S_lam(lmd)]
-
-#conditions = [
-#    BundleIVP(t_0=0, u_0=None, bundle_param_lookup={'u_0': 1})   # we refer to u_0 as parameter 1; correspondingly lambda will be parameter 0 below
-#]
 
 # Learning only S_lambda as a function of lambda, fix I_0 to some value
 conditions = [
@@ -75,10 +68,10 @@ nets = [
     NN()
 ]
 
-#train_gen = GeneratorND(grid=[16, 32, 16], r_min=[TAU_MIN, LAMBDA_MIN, I0_MIN], r_max=[TAU_MAX, LAMBDA_MAX, I0_MAX],\
+#train_gen = GeneratorND(grid=[16, 32], r_min=[TAU_MIN, LAMBDA_MIN], r_max=[TAU_MAX, LAMBDA_MAX],\
 #                        methods=['uniform', 'log-spaced', 'uniform'])
-#valid_gen = GeneratorND(grid=[16, 32, 16], r_min=[TAU_MIN, LAMBDA_MIN, I0_MIN], r_max=[TAU_MAX, LAMBDA_MAX, I0_MAX],\
-#                        methods=['uniform', 'log-spaced', 'uniform'])
+#valid_gen = GeneratorND(grid=[16, 32], r_min=[TAU_MIN, LAMBDA_MIN], r_max=[TAU_MAX, LAMBDA_MAX],\
+#                        methods=['uniform', 'log-spaced'])
 
 solver = BundleSolver1D(
     ode_system=diff_eq,
@@ -88,8 +81,6 @@ solver = BundleSolver1D(
     t_max=TAU_MAX, 
 #    train_generator=train_gen,
 #    valid_generator=valid_gen,
-#    theta_min=[LAMBDA_MIN, I0_MIN[0]],  # 0: lambda, 1: u_0
-#    theta_max=[LAMBDA_MAX, I0_MAX[0]],  # 0: lambda, 1: u_0
     theta_min=[LAMBDA_MIN],  # 0: lambda, 1: u_0
     theta_max=[LAMBDA_MAX],  # 0: lambda, 1: u_0
     eq_param_index=(0,),  # we refer to lambda as parameter 0; correspondingly u_0 is parameter 1 (as in conditions above)
@@ -98,9 +89,7 @@ solver = BundleSolver1D(
     nets=nets,
 )
 
-#train(solver, epochs=[10, 10, 10], lrs=[1e-3, 5e-4, 1e-4])
-
-solver.fit(max_epochs=20)
+solver.fit(max_epochs=40000)
 solution = solver.get_solution(best=True)
 
 save(solver, "model_params.pt")
@@ -115,7 +104,7 @@ plt.savefig('loss.png')
 
 # Convert our scalar wavelength to a vector of 10 wavelengths
 
-wav = np.logspace(np.log10(4000), np.log10(7000), 10)
+wav = np.logspace(LAMBDA_MIN, LAMBDA_MAX, 10)
 
 ## Define our analytic solution for a blackbody source function starting at some intensity I_0 = 2*S_\lambda
 
@@ -127,14 +116,13 @@ k = 1.3807e-16 # cm^2 g s^-2 K^-1
 
 # Analytic blackbody function calculation
 
-wav_analytic = np.logspace(np.log10(4000), np.log10(7000), len(wav))*1e-8 # 1000 to 100,000 Angstroms (100 nm to 10 microns) in units of cm
+wav_analytic = np.logspace(LAMBDA_MIN, LAMBDA_MAX, len(wav))*1e-8 # 1000 to 100,000 Angstroms (100 nm to 10 microns) in units of cm
 T = 5800 # temperature, in Kelvin
 S_lam_analytic = (2*h*c**2/wav_analytic**5) * 1/(np.exp(h*c/(wav_analytic*k*T)) - 1) # erg / s / cm2 / cm
 S_lam_analytic *= 1e-8 # erg / s / cm2 / cm to erg / s / cm2 / A
 
 # Initial condition
 
-#I_0, S_lam_analytic = np.log10(I_0), np.log10(S_lam_analytic)
 S_lam_analytic = np.log10(S_lam_analytic)
 
 taus = np.linspace(0, 10, 100)
@@ -151,36 +139,36 @@ for l, lmd_value in enumerate(wav):
     lmd = torch.Tensor(np.log10(lmd_value) * np.ones_like(taus))
     I_nu_nn[:, l] = solution(torch.Tensor(taus), lmd, to_numpy=True)  # network solution takes in two inputs
 
-#plt.rc('font', size=18)
-#tau_idx = np.argmin(np.abs(taus-2.0))
-#fig, ax = plt.subplots(figsize=(10, 8))
-#ax.plot(wav, I_nu_nn[tau_idx, :], c='r', label='NN')
-#ax.plot(wav, I_nu[tau_idx, :], c='k', label='analytic')
-#ax.plot(wav_analytic*1e8, S_lam_analytic, c='blue', ls='--', label=r'$S_\lambda$') # source function reference
-#ax.set_title(r'$\tau = {}$'.format(taus[tau_idx]))
-#ax.set_xscale('log')
-#ax.set_xlabel(r'$\lambda \ [\AA]$')
-#ax.set_ylabel(r'$\log_{10} I_\nu \ [\frac{erg}{s cm^2 A}]$')
-#plt.legend(fontsize=14)
-#plt.tight_layout()
-#plt.savefig('I_vs_lambda.png')
-
 plt.rc('font', size=20)
 fig, axs = plt.subplots(2, 2, figsize=(16, 12))
-ref_tau = np.array([[0, 2], [5, 10]])
+ref_tau = np.array([[0, 2], [4, 10]])
 for i in [0, 1]:
     for j in [0, 1]:
         plt.rc('font', size=18)
         tau_idx = np.argmin(np.abs(taus-ref_tau[i, j]))
         axs[i, j].plot(wav, I_nu_nn[tau_idx, :], c='r', label='NN')
-        axs[i, j].plot(wav, I_nu[tau_idx, :], c='k', label='analytic')
-        axs[i, j].plot(wav_analytic*1e8, S_lam_analytic, c='blue', ls='--', label=r'$S_\lambda$') # source function reference
+        axs[i, j].plot(wav, I_nu[tau_idx, :], c='k', ls='-.', alpha=0.5, label='analytic')
+        axs[i, j].plot(wav_analytic*1e8, S_lam_analytic, c='blue', ls='--', alpha=0.5, label=r'$S_\lambda$') # source function reference
         axs[i, j].set_title(r'$\tau = {}$'.format(taus[tau_idx]))
         axs[i, j].set_xscale('log')
         axs[i, j].set_xlabel(r'$\lambda \ [\AA]$')
         axs[i, j].set_ylabel(r'$\log_{10} I_\nu \ [\frac{erg}{s cm^2 A}]$')
-        #ax.yaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter('%0.0f'))
         plt.tight_layout()
+        filters = np.array(glob.glob('filters/*'))
+        wavelengths = 'grizyJHKS'
+        colors = {"g": "blue", "r": "cyan", "i": "lime", "z": "green", "y": "greenyellow", "J": "gold",
+         "H": "orange", "K": "red", "S": "darkred"}
+        text_locs = {"g": 0.09, "r": 0.25, "i": 0.35, "z": 0.44, "y": 0.51, "J": 0.61, "H": 0.75, "K": 0.92}
+        for fltr in range(len(filters)):
+            filter_wavs = np.loadtxt(filters[fltr])
+            filter_wavs = filter_wavs[:, 0] # Angstroms
+            wav_low, wav_upp = filter_wavs[0], filter_wavs[-1]
+            fltr_band = filters[fltr].split('/')[-1][0]
+            if fltr_band == "S": continue
+            text_loc = text_locs[fltr_band]
+            fltr_indx = wavelengths.find(fltr_band)
+            axs[i, j].axvspan(wav_low, wav_upp, alpha=0.5, color=colors[wavelengths[fltr_indx]])
+            print(wav, wav_analytic*1e8, wav_low, wav_upp)
 handles, labels = axs[0, 0].get_legend_handles_labels()
 fig.legend(handles, labels, loc='center')
 plt.savefig('I_vs_lambda.png')
